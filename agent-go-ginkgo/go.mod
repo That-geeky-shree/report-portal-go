@@ -7,8 +7,11 @@ toolchain go1.23.1
 require (
 	github.com/google/uuid v1.6.0
 	github.com/onsi/ginkgo/v2 v2.26.0
-	github.com/reportportal/client-go v0.0.0
+	github.com/reportportal/client-go v0.1.0
 )
+
+// Until client-go is published under github.com/reportportal/client-go, use local path.
+replace github.com/reportportal/client-go => ../client-go
 
 require (
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
@@ -24,5 +27,3 @@ require (
 	golang.org/x/tools v0.36.0 // indirect
 )
 
-// Local development: replace with local path until client-go is published
-replace github.com/reportportal/client-go => ../client-go
