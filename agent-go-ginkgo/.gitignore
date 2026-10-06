@@ -1,0 +1,2 @@
+# compiled binary (built with `go build ./cmd/ginkgo-rp`)
+/ginkgo-rp

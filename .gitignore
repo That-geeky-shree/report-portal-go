@@ -1,0 +1,19 @@
+# ReportPortal credentials — never commit real API keys
+reportportal.properties
+
+# Agent log output
+rp-agent.log
+*.log
+
+# Go build artifacts
+*.exe
+*.test
+*.out
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.iml
