@@ -1,2 +1,3 @@
-# compiled binary (built with `go build ./cmd/ginkgo-rp`)
-/ginkgo-rp
+# local ReportPortal credentials and agent log; never commit
+reportportal.properties
+rp-agent.log

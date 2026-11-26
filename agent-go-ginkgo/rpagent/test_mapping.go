@@ -19,7 +19,11 @@ func ExtractTestReferenceIdFromReportEntry(spec types.SpecReport) string {
 		if strings.HasPrefix(label, LabelRefIDPrefix) {
 			count++
 			if count > 1 {
-				fmt.Fprintf(os.Stderr, "WARNING: multiple rp.ref labels on test %q — using first\n", spec.LeafNodeText)
+				fmt.Fprintf(
+					os.Stderr,
+					"WARNING: multiple rp.ref labels on test %q — using first\n",
+					spec.LeafNodeText,
+				)
 			}
 			if found == "" {
 				found = strings.TrimSpace(strings.TrimPrefix(label, LabelRefIDPrefix))

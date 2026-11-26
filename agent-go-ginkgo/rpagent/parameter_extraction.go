@@ -6,21 +6,26 @@ import (
 	"strings"
 
 	"github.com/onsi/ginkgo/v2/types"
-	"github.com/reportportal/client-go/pkg/gorp"
 )
+
+// Parameter is a key/value pair attached to a test item, extracted from a DescribeTable entry name.
+type Parameter struct {
+	Key   string
+	Value string
+}
 
 // ExtractParametersFromEntryName extracts key=value parameters from a DescribeTable entry name.
 // Supports formats: key='value' and key="value"
 //
 // Example entry name: "input='hello' operation='upper' expected='HELLO'"
-func ExtractParametersFromEntryName(entryName string) []*gorp.Parameter {
+func ExtractParametersFromEntryName(entryName string) []*Parameter {
 	re := regexp.MustCompile(`(\w+)=['"]([^'"]*?)['"]`)
 	matches := re.FindAllStringSubmatch(entryName, -1)
 
-	params := make([]*gorp.Parameter, 0, len(matches))
+	params := make([]*Parameter, 0, len(matches))
 	for _, match := range matches {
 		if len(match) == 3 {
-			params = append(params, &gorp.Parameter{Key: match[1], Value: match[2]})
+			params = append(params, &Parameter{Key: match[1], Value: match[2]})
 		}
 	}
 	return params
@@ -46,7 +51,7 @@ func GetDescribeTableName(spec types.SpecReport) string {
 }
 
 // LogParameterExtraction prints extracted parameters for debugging.
-func LogParameterExtraction(spec types.SpecReport, parameters []*gorp.Parameter) {
+func LogParameterExtraction(spec types.SpecReport, parameters []*Parameter) {
 	if len(parameters) > 0 {
 		fmt.Printf("Extracted %d parameter(s) from: %s\n", len(parameters), spec.LeafNodeText)
 		for _, p := range parameters {

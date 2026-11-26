@@ -8,8 +8,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/reportportal/client-go/pkg/gorp"
 )
 
 // RPLogger writes agent diagnostic logs to a file.
@@ -31,13 +29,17 @@ func InitializeRPLogger() error {
 	}
 
 	logPath := filepath.Join(root, "rp-agent.log")
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to create rp-agent.log: %w", err)
 	}
 
 	l := &RPLogger{logFile: f}
-	l.write("INFO", "RP_LOGGER", fmt.Sprintf("ReportPortal Agent started — %s", time.Now().Format("2006-01-02 15:04:05")))
+	l.write(
+		"INFO",
+		"RP_LOGGER",
+		fmt.Sprintf("ReportPortal Agent started — %s", time.Now().Format("2006-01-02 15:04:05")),
+	)
 	l.write("INFO", "RP_LOGGER", fmt.Sprintf("log file: %s", logPath))
 
 	rpLoggerMu.Lock()
@@ -54,8 +56,15 @@ func CloseRPLogger() {
 	rpLoggerMu.Unlock()
 
 	if l != nil && l.logFile != nil {
-		l.write("INFO", "RP_LOGGER", fmt.Sprintf("ReportPortal Agent stopped — %s", time.Now().Format("2006-01-02 15:04:05")))
-		l.logFile.Close()
+		l.write(
+			"INFO",
+			"RP_LOGGER",
+			fmt.Sprintf(
+				"ReportPortal Agent stopped — %s",
+				time.Now().Format("2006-01-02 15:04:05"),
+			),
+		)
+		_ = l.logFile.Close()
 	}
 }
 
@@ -67,9 +76,9 @@ func (l *RPLogger) write(level, component, message string) {
 	defer l.mu.Unlock()
 	entry := fmt.Sprintf("[%s] %s [%s] %s\n",
 		time.Now().Format("2006-01-02 15:04:05.000"), level, component, message)
-	l.logFile.WriteString(entry)
+	_, _ = l.logFile.WriteString(entry)
 	if level == "ERROR" || level == "FATAL" {
-		l.logFile.Sync()
+		_ = l.logFile.Sync()
 	}
 }
 
@@ -102,24 +111,15 @@ func LogError(component, message string) {
 	}
 }
 
-// GetHTTPInterceptor returns the gorp HTTPInterceptor that writes requests/responses to the log file.
-// Returns nil if the logger has not been initialised.
-func GetHTTPInterceptor() gorp.HTTPInterceptor {
-	if currentLogger() == nil {
-		return nil
-	}
-	return logHTTPRequest
-}
-
-func logHTTPRequest(req *gorp.HTTPRequest, resp *gorp.HTTPResponse) {
+func logHTTP(method, url, status string, duration time.Duration, reqBody, respBody string) {
 	l := currentLogger()
 	if l == nil {
 		return
 	}
 	entry := fmt.Sprintf(
 		"HTTP %s %s -> %s (%v)\nRequest:  %s\nResponse: %s",
-		req.Method, req.URL, resp.Status, resp.Duration,
-		formatJSON(req.Body), formatJSON(resp.Body),
+		method, url, status, duration,
+		formatJSON(reqBody), formatJSON(respBody),
 	)
 	l.write("DEBUG", "HTTP", maskAuth(entry))
 }

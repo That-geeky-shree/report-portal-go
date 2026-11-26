@@ -9,7 +9,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	rpagent "github.com/reportportal/agent-go-ginkgo/pkg/rpagent"
+	rpagent "github.com/reportportal/goRP/pkg/ginkgo/rpagent"
 )
 
 // ─── 1. P0 — By() steps with INFO logs (log-to-step routing) ─────────────────

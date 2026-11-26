@@ -2,6 +2,7 @@ package rpagent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -42,9 +43,19 @@ func InitializeAttachments() {
 	if tempAttachmentDir != "" {
 		return
 	}
-	dir, err := os.MkdirTemp("", "rp-agent-attachments-*")
+	// The session ID is part of the name so the wrapper can remove this run's directories,
+	// and only this run's, after every worker has finished. Workers cannot all do it
+	// themselves: ReportAfterSuite runs on one process only.
+	prefix := "rp-agent-attachments-"
+	if sessionID := os.Getenv("RP_SESSION_ID"); sessionID != "" {
+		prefix += sessionID + "-"
+	}
+	dir, err := os.MkdirTemp("", prefix+"*")
 	if err != nil {
-		log.Fatalf("CRITICAL: failed to create temp directory for attachments: %v", err)
+		// Reporting must never kill the test process. Without a directory, AddAttachment
+		// reports an attachment error entry instead of uploading the file.
+		log.Printf("WARNING: could not create the attachment temp directory: %v", err)
+		return
 	}
 	tempAttachmentDir = dir
 	LogVerboseOperation(fmt.Sprintf("attachment temp dir: %s", tempAttachmentDir))
@@ -54,7 +65,7 @@ func InitializeAttachments() {
 // Call once after all tests finish.
 func CleanupAttachments() {
 	if tempAttachmentDir != "" {
-		os.RemoveAll(tempAttachmentDir)
+		_ = os.RemoveAll(tempAttachmentDir)
 		tempAttachmentDir = ""
 	}
 }
@@ -84,15 +95,27 @@ func AddAttachment(filePath, message string) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		log.Printf("WARNING: cannot access attachment file %s: %v", filePath, err)
-		errPayload, _ := json.Marshal(struct{ Msg string }{Msg: fmt.Sprintf("%s#failed to access file: %v", message, err)})
+		errPayload, _ := json.Marshal(
+			struct{ Msg string }{Msg: fmt.Sprintf("%s#failed to access file: %v", message, err)},
+		)
 		ginkgo.AddReportEntry(filePath, fmt.Sprintf("%s%s", attachmentErrorPrefix, errPayload))
 		return
 	}
 
 	if fileInfo.Size() > attachmentConfig.MaxFileSize {
-		log.Printf("WARNING: attachment %s (%d bytes) exceeds %d byte limit", filePath, fileInfo.Size(), attachmentConfig.MaxFileSize)
+		log.Printf(
+			"WARNING: attachment %s (%d bytes) exceeds %d byte limit",
+			filePath,
+			fileInfo.Size(),
+			attachmentConfig.MaxFileSize,
+		)
 		errPayload, _ := json.Marshal(struct{ Msg string }{
-			Msg: fmt.Sprintf("%s#file size (%d bytes) exceeds limit (%d bytes)", message, fileInfo.Size(), attachmentConfig.MaxFileSize),
+			Msg: fmt.Sprintf(
+				"%s#file size (%d bytes) exceeds limit (%d bytes)",
+				message,
+				fileInfo.Size(),
+				attachmentConfig.MaxFileSize,
+			),
 		})
 		ginkgo.AddReportEntry(filePath, fmt.Sprintf("%s%s", attachmentErrorPrefix, errPayload))
 		return
@@ -101,7 +124,9 @@ func AddAttachment(filePath, message string) {
 	tempFile, err := copyToTempLocation(filePath)
 	if err != nil {
 		log.Printf("WARNING: failed to copy attachment %s to temp location: %v", filePath, err)
-		errPayload, _ := json.Marshal(struct{ Msg string }{Msg: fmt.Sprintf("%s#failed to copy file: %v", message, err)})
+		errPayload, _ := json.Marshal(
+			struct{ Msg string }{Msg: fmt.Sprintf("%s#failed to copy file: %v", message, err)},
+		)
 		ginkgo.AddReportEntry(filePath, fmt.Sprintf("%s%s", attachmentErrorPrefix, errPayload))
 		return
 	}
@@ -118,7 +143,9 @@ func AddAttachment(filePath, message string) {
 		return
 	}
 	ginkgo.AddReportEntry(filePath, fmt.Sprintf("%s%s", attachmentPrefix, payload))
-	LogVerboseOperation(fmt.Sprintf("queued attachment: %s (%d bytes)", filepath.Base(filePath), fileInfo.Size()))
+	LogVerboseOperation(
+		fmt.Sprintf("queued attachment: %s (%d bytes)", filepath.Base(filePath), fileInfo.Size()),
+	)
 }
 
 // ParseAttachmentPayload decodes the JSON payload from a report entry value.
@@ -147,23 +174,26 @@ func copyToTempLocation(originalPath string) (string, error) {
 	if attachmentConfig.TempDir != "" {
 		tempDir = attachmentConfig.TempDir
 	}
+	if tempDir == "" {
+		return "", errors.New("the attachment temp directory is unavailable")
+	}
 
 	ext := filepath.Ext(originalPath)
 	tmpFile, err := os.CreateTemp(tempDir, "rp-attachment-*"+ext)
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}
-	defer tmpFile.Close()
+	defer func() { _ = tmpFile.Close() }()
 
 	src, err := os.Open(originalPath)
 	if err != nil {
-		os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name())
 		return "", fmt.Errorf("failed to open source file: %w", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	if _, err := io.Copy(tmpFile, src); err != nil {
-		os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name())
 		return "", fmt.Errorf("failed to copy file content: %w", err)
 	}
 	return tmpFile.Name(), nil

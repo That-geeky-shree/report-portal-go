@@ -22,7 +22,7 @@ func SaveSuiteCache(sessionID string, cache *SuiteCache) error {
 		return fmt.Errorf("failed to marshal suite cache: %w", err)
 	}
 	path := filepath.Join(os.TempDir(), fmt.Sprintf(suiteCachePattern, sessionID))
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write suite cache to %s: %w", path, err)
 	}
 	return nil

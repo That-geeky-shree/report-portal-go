@@ -5,7 +5,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	_ "github.com/reportportal/agent-go-ginkgo/pkg/rpagent"
+	_ "github.com/reportportal/goRP/pkg/ginkgo/rpagent"
 )
 
 func TestCalculator(t *testing.T) {

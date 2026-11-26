@@ -30,7 +30,9 @@ func ExtractPriorityFromReportEntry(spec types.SpecReport) int {
 	// Try leaf node labels first.
 	for _, label := range spec.LeafNodeLabels {
 		if strings.HasPrefix(label, LabelPriorityPrefix) {
-			if level, err := strconv.Atoi(strings.TrimPrefix(label, LabelPriorityPrefix)); err == nil {
+			if level, err := strconv.Atoi(
+				strings.TrimPrefix(label, LabelPriorityPrefix),
+			); err == nil {
 				if level >= 0 && level <= 4 {
 					return level
 				}
@@ -45,10 +47,16 @@ func ExtractPriorityFromReportEntry(spec types.SpecReport) int {
 		if strings.HasPrefix(label, LabelPriorityPrefix) {
 			count++
 			if count > 1 {
-				fmt.Fprintf(os.Stderr, "WARNING: multiple rp.priority labels on test %q — using first\n", spec.LeafNodeText)
+				fmt.Fprintf(
+					os.Stderr,
+					"WARNING: multiple rp.priority labels on test %q — using first\n",
+					spec.LeafNodeText,
+				)
 			}
 			if found == -1 {
-				if level, err := strconv.Atoi(strings.TrimPrefix(label, LabelPriorityPrefix)); err == nil {
+				if level, err := strconv.Atoi(
+					strings.TrimPrefix(label, LabelPriorityPrefix),
+				); err == nil {
 					if level >= 0 && level <= 4 {
 						found = level
 					}

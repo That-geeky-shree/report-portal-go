@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	. "github.com/onsi/ginkgo/v2"
+	"github.com/onsi/ginkgo/v2"
 )
 
 // Label prefix constants used to encode metadata in Ginkgo labels.
@@ -37,15 +37,15 @@ func TestReference(refID string) string {
 	if refID == "" {
 		return "rp.ref:unset"
 	}
-	// Sanitise characters Ginkgo rejects in labels (&|!,()/). Replace with _.
-	sanitised := strings.Map(func(r rune) rune {
+	// Sanitize characters Ginkgo rejects in labels (&|!,()/). Replace with _.
+	sanitized := strings.Map(func(r rune) rune {
 		switch r {
 		case '&', '|', '!', ',', '(', ')', '/':
 			return '_'
 		}
 		return r
 	}, refID)
-	return fmt.Sprintf("%s%s", LabelRefIDPrefix, sanitised)
+	return fmt.Sprintf("%s%s", LabelRefIDPrefix, sanitized)
 }
 
 // Log sends a structured log entry to ReportPortal for the currently running test.
@@ -56,5 +56,9 @@ func TestReference(refID string) string {
 //	rpagent.Log("INFO", "Starting token validation")
 //	rpagent.Log("ERROR", "Unexpected response: "+body)
 func Log(level, message string) {
-	AddReportEntry(fmt.Sprintf("RP_LOG#%s#%s#%s", "rp_log", level, message))
+	// Never: the entry is only a carrier for the agent, so keep it out of Ginkgo's console output.
+	ginkgo.AddReportEntry(
+		fmt.Sprintf("RP_LOG#%s#%s#%s", "rp_log", level, message),
+		ginkgo.ReportEntryVisibilityNever,
+	)
 }

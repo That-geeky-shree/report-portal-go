@@ -1,28 +1,35 @@
-# agent-go-ginkgo
+# Ginkgo v2 agent for ReportPortal
 
 A [ReportPortal](https://reportportal.io) agent for [Ginkgo v2](https://github.com/onsi/ginkgo) — the Go BDD test framework.
-
-📖 **[Integration Guide](https://that-geeky-shree.github.io/report-portal-go/integration-guide.html)** — full setup, parallel execution, parameterized tests, and API flow diagrams.
 
 Reports test results to ReportPortal in real time as each spec runs, including priorities, external test reference IDs, structured logs, and file attachments. Supports parallel execution across multiple Ginkgo processes.
 
 ## Requirements
 
-- Go 1.21+
+- Go 1.25+ (the version in `go.mod`)
 - Ginkgo v2 (`github.com/onsi/ginkgo/v2`)
 - A running ReportPortal instance (v5+)
 
 ## Installation
 
 ```bash
-go get github.com/reportportal/agent-go-ginkgo
+go get github.com/reportportal/goRP/pkg/ginkgo
 ```
 
 Install the `ginkgo-rp` wrapper binary:
 
 ```bash
-go install github.com/reportportal/agent-go-ginkgo/cmd/ginkgo-rp@latest
+go install github.com/reportportal/goRP/pkg/ginkgo/cmd/ginkgo-rp@latest
 ```
+
+> `pkg/ginkgo` is a separate Go module inside goRP, so it does not add Ginkgo to the main goRP dependencies.
+> It depends on a released goRP (`v5.2.2` or newer), not on the surrounding checkout. Once a
+> `pkg/ginkgo/vX.Y.Z` tag is published, the commands above install that release. Until then
+> `go install ...@latest` has no version to resolve; build from a checkout instead:
+>
+> ```bash
+> cd pkg/ginkgo && go install ./cmd/ginkgo-rp
+> ```
 
 Also make sure the Ginkgo CLI is installed:
 
@@ -49,8 +56,20 @@ rp.debug = false
 | `rp.endpoint` | Yes      | Full URL of your ReportPortal host (trailing slash and `/api` suffix are stripped automatically) |
 | `rp.api.key`  | Yes      | API key from your user profile     |
 | `rp.project`  | Yes      | Project slug in ReportPortal       |
-| `rp.launch`   | Yes      | Name for the test launch           |
+| `rp.launch`   | No       | Name for the test launch (default `GINKGO-RP-LAUNCH`) |
 | `rp.debug`    | No       | Set `true` to log all HTTP request/response bodies to `rp-agent.log` |
+| `rp.description` | No    | Launch description                 |
+| `rp.attributes`  | No    | Launch attributes: `key:value;tag;key2:value2` (a part without `:` is a bare tag) |
+| `rp.mode`        | No    | `DEFAULT` (default; shown on the Launches page) or `DEBUG` |
+
+Every key can also be set by an environment variable, which **wins over the file**: `RP_ENDPOINT`, `RP_API_KEY`, `RP_PROJECT`, `RP_LAUNCH`, `RP_DEBUG`, `RP_DESCRIPTION`, `RP_ATTRIBUTES`, `RP_MODE`. If `RP_ENDPOINT`, `RP_PROJECT` and `RP_API_KEY` are all set, no properties file is needed (CI).
+
+```bash
+RP_ENDPOINT=https://rp.example.com RP_PROJECT=my_proj RP_API_KEY=$SECRET \
+RP_ATTRIBUTES="build:$BUILD_ID;env:ci" ginkgo-rp -r ./...
+```
+
+Ginkgo `Label(...)` values (other than the `rp.*` control labels) are reported as bare-tag attributes on the spec item.
 
 Add `reportportal.properties` to `.gitignore` — it contains your API key.
 
@@ -102,7 +121,7 @@ import (
 
     . "github.com/onsi/ginkgo/v2"
     . "github.com/onsi/gomega"
-    _ "github.com/reportportal/agent-go-ginkgo/pkg/rpagent"
+    _ "github.com/reportportal/goRP/pkg/ginkgo/rpagent"
 )
 
 func TestMySuite(t *testing.T) {
@@ -118,7 +137,7 @@ func TestMySuite(t *testing.T) {
 Tag tests with a priority level for better organisation in ReportPortal:
 
 ```go
-import rpagent "github.com/reportportal/agent-go-ginkgo/pkg/rpagent"
+import rpagent "github.com/reportportal/goRP/pkg/ginkgo/rpagent"
 
 var _ = Describe("Checkout", func() {
     It("should complete payment",
@@ -218,6 +237,18 @@ It("should complete checkout", func() {
 })
 ```
 
+Steps, logs and attachments carry the times Ginkgo recorded while the spec ran, not the time they were uploaded. A step starts at its `By()` call and ends when the next step starts, when its `By(text, func(){...})` callback returns, or when the spec ends. A log or attachment has the time of the `rpagent.Log` / `rpagent.AddAttachment` call. A spec item ends at the spec's own end time. All times are clamped into the spec item's window, because ReportPortal requires children to start after their parent and end before it.
+
+Each `By()` step has its own status. When a spec fails, is skipped or is interrupted, only the step that was running at that moment gets that status (plus any `By(text, func(){...})` callback step enclosing it); steps that were already past stay PASSED. The spec item itself always reports the spec's final status. The failure message is logged on that same running step, so it appears right under the red step; if no step was running, it is logged on the spec item. A skipped spec gets an informational `SKIPPED` entry with the reason (Ginkgo records `Skip("reason")` as a failure internally, but it is not reported as an error).
+
+### GinkgoWriter and stdout Output
+
+Whatever a spec writes to `GinkgoWriter` is sent to ReportPortal as `DEBUG` logs, on the item that was running when it was written: text before the first `By()` goes on the spec item, and text after a `By()` goes on that step. ANSI colour codes are removed. Ginkgo keeps no timestamp per write, so each piece carries the start time of the item it belongs to.
+
+Ginkgo also captures what the spec printed to stdout and stderr, but only when it intercepts output, which it does in parallel runs (`-p`). In a serial run that stream is empty. When present it is sent as one `INFO` log on the spec item, with stdout and stderr merged in the order Ginkgo captured them.
+
+Output is split into entries of at most 32 KiB, and at most 1 MiB per spec and stream is sent; if a spec writes more, a `WARN` log says how many bytes were omitted.
+
 ### Parameterized / Table-Driven Tests
 
 `DescribeTable` entries are detected and reported automatically. Parameters appear in the RP test item when the `Entry` description follows `key='value'` format:
@@ -241,6 +272,65 @@ Entry("input='hello' expected='HELLO'", Label(rpagent.Priority(2))),
 
 Detection rule: a spec is treated as a table entry if its name contains `=` and at least one `'` or `"` character. Parameters are extracted by the regex `(\w+)=['"]([^'"]*?)['"]`.
 
+### Stable Test Identity (History)
+
+ReportPortal links the same test across launches by its `testCaseId` (and `uniqueId`). The agent builds them only from data that does not change between runs:
+
+```
+testCaseId = <module path>/<package dir> > <Describe> > <Context> > <spec text>
+codeRef    = <file path relative to the module root>:<line>
+uniqueId   = UUIDv5 of the testCaseId
+```
+
+For example `github.com/acme/shop/cart > Cart > Checkout > applies a coupon`. `By()` steps get `... > By: <step text>`. Nothing launch-specific (item IDs, launch IDs, absolute paths, timestamps) is part of the identity, so history, retries and auto-analysis work across runs and machines.
+
+Renaming a spec, container or package starts a new history for it. Moving a spec within its file only changes `codeRef`.
+
+Two specs with the same package, containers and text share one identity (and one history), because Ginkgo gives the agent no stable way to tell identical names apart. Their `codeRef` still differs, and the agent logs a warning naming both locations. Rename one of them to separate their history.
+
+### Flaky Specs (FlakeAttempts / MustPassRepeatedly)
+
+A spec that Ginkgo runs more than once (`FlakeAttempts(n)`, `--flake-attempts`, `MustPassRepeatedly(n)`) is reported as ReportPortal **retries**: one item per attempt, each started as a retry of the previous one. The last attempt is the item you see and the only one counted in launch statistics; earlier attempts are folded under it, each with its own failure message, `GinkgoWriter` output and `By()` steps. Failed attempts are FAILED; with `MustPassRepeatedly` the earlier passing runs are PASSED retries. Ginkgo does not keep the failure message of an earlier attempt, so the agent records it while the attempt runs.
+
+### Network Resilience (Retries)
+
+While specs run, the agent's calls to ReportPortal (start/finish test item, logs, attachments) are retried up to **3 attempts** with exponential backoff and jitter (200 ms base). The `ginkgo-rp` wrapper's own calls (creating the launch and suites, finishing suites and the launch) are single attempts.
+
+| Failure | Retried? |
+|---------|----------|
+| Network errors (connection refused/reset, timeout, EOF, DNS; detected by error type, not message text) | Yes |
+| HTTP 5xx | Yes |
+| HTTP 429 | Yes |
+| Other HTTP 4xx (e.g. 400, 401, 404) | No, fails immediately |
+
+Each item start request carries one client-generated UUID that is reused across attempts. If the server created the item but the response was lost, the retry is deduplicated by ReportPortal instead of creating a duplicate item.
+
+If every attempt fails, the agent logs a warning and the test run continues; a ReportPortal outage during a run does not fail your specs.
+
+The logs of one spec (`Log()` calls, `GinkgoWriter` and stdout output, the failure message) are sent together in batch requests of at most 200 logs or 2 MB, before the spec's items are finished. Attachments are uploaded one file at a time.
+
+## Examples and Sanity Check
+
+`examples/` contains three small suites (`calculator`, `order-management`, `rp-features`; 16 specs in total) that exercise every feature above against a real ReportPortal: priorities, test references, `By()` steps, all log levels, file attachments, failures with evidence, parameterized entries and skips.
+
+They are behind the `sanity` build tag, so the intentional failures never run under a plain `go test ./...`.
+
+1. Create `examples/reportportal.properties` with your endpoint, API key, project and launch name (it is git-ignored).
+2. Run:
+
+```bash
+cd pkg/ginkgo/examples
+ginkgo-rp --tags sanity -r -p --keep-going
+```
+
+Expected: 16 specs (12 passed, 3 failed, 1 skipped). The 3 failures are intentional, one each in `calculator`, `order-management` and `rp-features`. The command exits non-zero, and a launch appears in ReportPortal with the suites, steps, logs and attachments.
+
+To run the same specs as plain Ginkgo, without ReportPortal:
+
+```bash
+go test -tags sanity ./examples/...
+```
+
 ## Status Mapping
 
 | Ginkgo state | ReportPortal status |
@@ -254,12 +344,28 @@ Detection rule: a spec is treated as a table entry if its name contains `=` and 
 | `aborted`   | Interrupted         |
 | `timedout`  | Interrupted         |
 
+### Container and Suite Status
+
+`Describe`/`Context` items are shared by every spec (and every parallel worker) beneath them, so the `ginkgo-rp` wrapper finishes them after all workers are done, deepest first. A container is `FAILED` if any spec beneath it failed, panicked, was interrupted or timed out; `SKIPPED` if every spec beneath it was skipped or pending; otherwise `PASSED`. It ends when the last spec beneath it ended, and a suite likewise ends when its last spec ended. Without this, ReportPortal closes them itself when the launch finishes, giving every container the launch's finish time.
+
+### BeforeSuite and AfterSuite Failures
+
+A failing `BeforeSuite` or `AfterSuite` (including the `Synchronized` variants) is reported as its own item under the suite: type `BEFORE_SUITE` or `AFTER_SUITE`, status `FAILED`, with an `ERROR` log holding the failure message and location. The suite and launch end `FAILED` even if every spec passed. ReportPortal does not count these configuration items in the launch statistics, so a launch can read "all passed" next to a failed status; the failed item inside the suite is where the cause is. The `ginkgo-rp` summary lists them under "Suite setup / teardown failures" and keeps them out of the test counts. When `BeforeSuite` fails Ginkgo does not run the specs, so the suite then contains only that failed item. Ginkgo reports how many specs it skipped but not their names, so the item's log says "N specs were not run because [BeforeSuite] failed." instead of listing them.
+
+Ginkgo reports these nodes only at the end of the suite, so they appear in ReportPortal when the suite finishes, not while it runs. In a parallel run the same failure is reported once, not once per process.
+
+### Temporary Files
+
+During a run the agent keeps small coordination files in `$TMPDIR` (per-process results, the shared container cache, and an attachment staging directory created only when a spec attaches a file). Every name contains the run's session ID, and the `ginkgo-rp` wrapper removes exactly that run's files when it finishes, so parallel runs on one machine never touch each other's. If the wrapper is killed before it can clean up, the leftovers are `rp_*` files and `rp-agent-attachments-*` directories in `$TMPDIR`; they are safe to delete once no run is in progress.
+
 ## Environment Variables
 
 | Variable                 | Default | Description |
 |--------------------------|---------|-------------|
 | `RP_SESSION_ID`          | —       | Set automatically by `ginkgo-rp`; do not set manually |
 | `RP_PROPERTIES_DEPTH`    | 10      | Directory levels to walk up when searching for `reportportal.properties` |
+| `RP_CONFIG_FILE`         | —       | Exact path of the properties file. Set automatically by `ginkgo-rp` for the workers; set it yourself to use a file outside the directory tree |
+| `RP_STRICT`              | false   | `true` makes ReportPortal failures fail the run instead of only warning |
 | `RP_LOCK_RETRY_COUNT`    | 50      | How many times a losing worker polls waiting for the lock winner to write the shared cache file. Default = 10 s total (50 × 200 ms). Increase for 100+ workers or slow disks. |
 | `RP_LOCK_RETRY_SLEEP_MS` | 200     | Milliseconds between each poll. Total max wait = `COUNT × SLEEP_MS`. For normal use (≤16 workers, fast network) defaults are fine. |
 
@@ -273,7 +379,7 @@ Every test reporting system needs three phases:
 |-------|-------------|-------------|
 | ① Before tests | Create RP launch, create suite items, write shared state to `$TMPDIR` | `ginkgo-rp` wrapper |
 | ② During tests | `ReportBeforeEach`/`ReportAfterEach` hooks stream each spec's result in real time | `rpagent` plugin (inside Ginkgo worker) |
-| ③ After tests | Read per-worker NDJSON files, finish suite items, finalize launch with pass/fail | `ginkgo-rp` wrapper |
+| ③ After tests | Read per-worker NDJSON files, finish Describe/Context and suite items, finalize launch with pass/fail | `ginkgo-rp` wrapper |
 
 The `ginkgo` binary only covers phase ②.
 
@@ -291,7 +397,8 @@ ginkgo-rp
   │                      write $TMPDIR/rp_agent_state_{session}.json  [no API key stored]
   │                      set RP_SESSION_ID env var
   │
-  ├─ Phase 2 (worker):   exec("ginkgo", ...) — blocking call
+  ├─ Phase 2 (worker):   run ginkgo as a child process and wait for it
+  │                      (SIGINT/SIGTERM are passed on to it, see "Interrupts and aborts")
   │                        └─ init() sees RP_SESSION_ID → re-reads API key from
   │                             reportportal.properties (not from state file)
   │                             registers ReportBeforeEach / ReportAfterEach hooks
@@ -300,14 +407,22 @@ ginkgo-rp
   │                             appends NDJSON to $TMPDIR/rp_status_{session}_{pid}.json
   │                             ReportAfterSuite → write done-flag, clean up temp files
   │
-  └─ Phase 3 (wrapper):  cmd.Run() returned → all workers already exited
-                         5s OS-flush wait → read NDJSON files
+  └─ Phase 3 (wrapper):  ginkgo exited → all workers already exited
+                         wait up to 5s for the workers' done-flags → read NDJSON files
                          PUT finish suite items  →  PUT /launch/finish
 ```
 
 **API key security:** The API key is never written to `$TMPDIR`. The state file contains only endpoint, project, launch ID, and session ID. Workers re-read the API key independently from `reportportal.properties`.
 
 **`--dry-run` and dormancy:** When `--dry-run` is passed, `ginkgo-rp` skips Phase 1 entirely — no launch is created and `RP_SESSION_ID` is never set. If a worker's `init()` cannot find the state file (e.g. under `--dry-run`, or when running plain `ginkgo`), it logs a warning and stays dormant. Running `go test ./...` never makes any HTTP calls to ReportPortal.
+
+**Suite discovery:** `ginkgo-rp` finds suites the way Ginkgo does: a package is a suite when one of its test files, among those compiled for your `--tags`, imports Ginkgo. Packages excluded by `--skip-package` are not listed either, so they never appear as empty suites. The suite name is the `RunSpecs` description, taken from a string literal or a package-level string constant; otherwise the directory name is used. Flags are split from package paths with Ginkgo's own flag definitions, so flag values such as `--tags sanity` are never mistaken for paths. Targets outside the working directory are allowed: the wrapper passes the location of the properties file it used to the workers (`RP_CONFIG_FILE`). If a package's tests run but it was not registered by `ginkgo-rp`, its worker logs an `ERROR ... will NOT be reported` line (tests are never aborted).
+
+**If ReportPortal is unreachable:** reporting problems never decide the result of your test run. If the launch cannot be created, `ginkgo-rp` prints a warning, runs the tests without reporting, and exits with Ginkgo's exit code. If finalizing the launch fails after the tests ran, it warns and still exits with Ginkgo's exit code. Set `RP_STRICT=true` to fail the run instead (exit code 1 before the tests, 2 after them).
+
+**Interrupts and aborts:** on Ctrl-C (SIGINT), SIGTERM or SIGHUP (a closing terminal), `ginkgo-rp` passes the signal to ginkgo and its test processes (SIGHUP as SIGTERM, which Ginkgo handles gracefully), waits for Ginkgo's own cleanup, finalizes the launch, and exits with 130 (SIGINT), 143 (SIGTERM) or 129 (SIGHUP). A signal that arrives before the tests have started closes the launch too. A second signal kills ginkgo and its test processes immediately. On Windows a signal cannot be passed on, so ginkgo is stopped at once and the launch is finalized. The spec that was running is reported as INTERRUPTED with Ginkgo's message, and the launch is FAILED. If `ginkgo-rp` has to give up after creating the launch (for example `ginkgo` is not on `PATH`), it finishes the suites and then the launch as STOPPED, so nothing stays In Progress.
+
+**Name and ID limits:** ReportPortal rejects an item name longer than 1,024 characters (HTTP 400, the item is never created), so a longer name is cut and ends in `...`. It stores at most 1,024 characters of a `testCaseId` and silently cuts the rest, which would make two long IDs with a common start identical. So a longer `testCaseId` is cut and ends in `~` plus 16 hex characters of a hash of the full ID: it stays deterministic between runs and different for different tests.
 
 ## How Parallel Execution Works
 

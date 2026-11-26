@@ -3,7 +3,7 @@ package calculator_test
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	rpagent "github.com/reportportal/agent-go-ginkgo/pkg/rpagent"
+	rpagent "github.com/reportportal/goRP/pkg/ginkgo/rpagent"
 )
 
 var _ = Describe("Calculator", func() {
